@@ -2,7 +2,7 @@ name: Automation-Task
 on:
   workflow_dispatch:
   schedule:
-    - cron: '30 2 * * 6'
+    - cron: '30 2 * */9 6'
 
 jobs:
   build:
